@@ -1,0 +1,15 @@
+{
+  "name": "mob-rush-playable",
+  "version": "1.0.0",
+  "description": "Playable ad (crowd runner) на PixiJS — вся игра в одном HTML-файле меньше 2 МБ",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node build.mjs --dev",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "pixi.js": "^7.4.3"
+  }
+}
