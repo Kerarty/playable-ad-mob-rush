@@ -1,7 +1,9 @@
-// подключил толпу, дорога пока прямо здесь
+// вынес дорогу в отдельный модуль, добавил скролл мира и попапы
 import { CONFIG } from './config.js';
 import { Sprites } from './render/sprites.js';
+import { Track } from './systems/track.js';
 import { Crowd } from './systems/crowd.js';
+import { Popups } from './systems/popupText.js';
 
 const C = CONFIG;
 Sprites.init();
@@ -31,27 +33,15 @@ function layout() {
 layout();
 window.addEventListener('resize', layout);
 
-// дорога: тайловый спрайт, скроллю вниз — ощущение бега вперёд
-function makeRoadTex(h) {
-  const w = C.ROAD_W;
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const g = c.getContext('2d');
-  g.fillStyle = '#20243d';
-  g.fillRect(0, 0, w, h);
-  g.fillStyle = '#2b3052';
-  g.fillRect(0, 0, w, 26);
-  return PIXI.Texture.from(c);
-}
-const road = new PIXI.TilingSprite(makeRoadTex(220), C.ROAD_W, C.H);
-road.position.set(C.ROAD_X, 0);
-root.addChild(road);
-
+const roadLayer = new PIXI.Container();
 const crowdLayer = new PIXI.Container();
-root.addChild(crowdLayer);
-const crowd = new Crowd(crowdLayer, Sprites);
+const fxLayer = new PIXI.Container();
+root.addChild(roadLayer, crowdLayer, fxLayer);
 
-// тащим толпу пальцем/мышкой
+const track = new Track(roadLayer, Sprites);
+const crowd = new Crowd(crowdLayer, Sprites);
+const popups = new Popups(fxLayer);
+
 let dragging = false;
 let lastX = 0;
 app.view.addEventListener('pointerdown', (e) => {
@@ -71,8 +61,9 @@ window.addEventListener('pointerup', () => { dragging = false; });
 
 app.ticker.add(() => {
   const dt = Math.min(app.ticker.deltaMS, 34) / 1000;
-  road.tilePosition.y = (road.tilePosition.y + C.SPEED * dt) % 220;
+  track.update(dt);
   crowd.update(dt);
+  popups.update(dt);
 });
 
 crowd.reset();
