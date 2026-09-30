@@ -1,9 +1,11 @@
-// вынес дорогу в отдельный модуль, добавил скролл мира и попапы
+// добавил звук (синтез через webaudio) и тряску камеры
 import { CONFIG } from './config.js';
 import { Sprites } from './render/sprites.js';
 import { Track } from './systems/track.js';
 import { Crowd } from './systems/crowd.js';
 import { Popups } from './systems/popupText.js';
+import { AudioSys } from './systems/audio.js';
+import { Camera } from './systems/camera.js';
 
 const C = CONFIG;
 Sprites.init();
@@ -33,18 +35,23 @@ function layout() {
 layout();
 window.addEventListener('resize', layout);
 
+// мир трясётся, UI сверху — потом пригодится
+const worldWrap = new PIXI.Container();
+root.addChild(worldWrap);
 const roadLayer = new PIXI.Container();
 const crowdLayer = new PIXI.Container();
 const fxLayer = new PIXI.Container();
-root.addChild(roadLayer, crowdLayer, fxLayer);
+worldWrap.addChild(roadLayer, crowdLayer, fxLayer);
 
 const track = new Track(roadLayer, Sprites);
 const crowd = new Crowd(crowdLayer, Sprites);
 const popups = new Popups(fxLayer);
+const cam = new Camera(worldWrap);
 
 let dragging = false;
 let lastX = 0;
 app.view.addEventListener('pointerdown', (e) => {
+  AudioSys.unlock(); // звук можно включать только после жеста пользователя
   dragging = true;
   lastX = e.clientX;
 });
@@ -60,10 +67,13 @@ window.addEventListener('pointermove', (e) => {
 window.addEventListener('pointerup', () => { dragging = false; });
 
 app.ticker.add(() => {
-  const dt = Math.min(app.ticker.deltaMS, 34) / 1000;
+  const rawDt = Math.min(app.ticker.deltaMS, 34) / 1000;
+  cam.update(rawDt);
+  const dt = rawDt * cam.dtScale();
   track.update(dt);
   crowd.update(dt);
   popups.update(dt);
+  AudioSys.update(); // планирует ноты фонового лупа
 });
 
 crowd.reset();
