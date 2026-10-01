@@ -1,17 +1,21 @@
-// Толпа: агенты на пружине держатся за лидера и отталкиваются друг от друга
+// Толпа: массив агентов, которые пружиной держатся за лидера (палец),
+// отталкиваются друг от друга и бегут на месте (2 кадра анимации).
 import { CONFIG } from '../config.js';
 
 const C = CONFIG;
 
 export class Crowd {
-  constructor(layer, sprites) {
+  constructor(layer, sprites, fx) {
     this.sprites = sprites;
+    this.fx = fx;               // частицы/попапы/камера
     this.layer = layer;
-    this.count = 0;
-    this.agents = [];
-    this.pool = [];
-    this.targetX = C.W / 2;
+    this.count = 0;             // «настоящее» число толпы (может быть больше отрисованных)
+    this.agents = [];           // живые агенты
+    this.pool = [];             // переиспользуемые спрайты
+    this.targetX = C.W / 2;     // куда тянет палец
     this.leaderX = C.W / 2;
+    this.onEmpty = null;        // вызовется, когда всех убили
+    this.onCountChanged = null;
 
     this.label = new PIXI.Text('3', {
       fontFamily: 'Arial', fontSize: 72, fontWeight: '900',
@@ -33,12 +37,92 @@ export class Crowd {
     this._updateLabel(true);
   }
 
+  // применяем операцию ворот, возвращаем новое число
+  applyOp(op, v) {
+    if (this.count <= 0) return 0;
+    switch (op) {
+      case '+': this.count += v; break;
+      case '×': this.count *= v; break;
+      case '−': this.count = Math.max(0, this.count - v); break;
+      case '÷': this.count = Math.floor(this.count / v); break;
+    }
+    this._syncSprites();
+    this._updateLabel(true);
+    if (this.count === 0 && this.onEmpty) this.onEmpty();
+    return this.count;
+  }
+
+  // убить одного юнита в точке (лопасть). count — «настоящее» число,
+  // а спрайтов рисуем максимум MAX_AGENTS, поэтому убираем ближайшего видимого
+  killAt(x, y) {
+    if (this.count <= 0) return false;
+    this.count--;
+    let best = null, bestD = 1e9;
+    for (const a of this.agents) {
+      const d = (a.x - x) * (a.x - x) + (a.y - y) * (a.y - y);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    if (best && bestD < 220 * 220) {
+      if (this.fx) {
+        this.fx.particles.burst(best.x, best.y, 7, {
+          speed: 260, life: 0.5, tex: 'dot',
+          tint: this.sprites.palette[best.colorIdx], scale: 0.7,
+        });
+      }
+      const i = this.agents.indexOf(best);
+      this.agents.splice(i, 1);
+      this._free(best);
+    }
+    this._updateLabel(true);
+    if (this.count === 0 && this.onEmpty) this.onEmpty();
+    return true;
+  }
+
+  // шипы срезают тех, кто оказался на их половине дороги
+  killSide(side) {
+    if (this.count <= 0) return 0;
+    const dead = Math.ceil(this.count / 2);
+    this.count -= dead;
+    // бахнем частицами по видимой части
+    let fxCount = 0;
+    for (const a of this.agents) {
+      if ((a.x - C.W / 2) * side < 0 && fxCount < 14) {
+        this.fx.particles.burst(a.x, a.y, 5, {
+          speed: 240, life: 0.45, tex: 'dot',
+          tint: this.sprites.palette[a.colorIdx], scale: 0.7,
+        });
+        fxCount++;
+      }
+    }
+    this._syncSprites();
+    this._updateLabel(true);
+    if (this.count === 0 && this.onEmpty) this.onEmpty();
+    return dead;
+  }
+
+  wipeAll(burst = true) {
+    this.count = 0;
+    let i = 0;
+    for (const a of this.agents.slice()) {
+      if (burst && i++ < 20 && this.fx) {
+        this.fx.particles.burst(a.x, a.y, 6, {
+          speed: 280, life: 0.5, tex: 'dot',
+          tint: this.sprites.palette[a.colorIdx], scale: 0.7,
+        });
+      }
+      this._free(a);
+    }
+    this.agents.length = 0;
+    this._updateLabel(true);
+  }
+
   _free(a) {
     a.spr.visible = false;
     a.shadow.visible = false;
     this.pool.push(a);
   }
 
+  // подгоняем число отрисованных агентов под count
   _syncSprites() {
     const shown = Math.min(this.count, C.MAX_AGENTS);
     while (this.agents.length > shown) {
@@ -57,9 +141,9 @@ export class Crowd {
     a.y = C.CROWD_Y + Math.sin(ang) * rad * 0.8;
     a.vx = 0; a.vy = 0;
     a.ph = Math.random() * Math.PI * 2;
-    a.sc = 0;
+    a.sc = 0;                                    // для анимации появления
     a.colorIdx = (Math.random() * this.sprites.palette.length) | 0;
-    a.sx = Math.cos(ang) * rad;
+    a.sx = Math.cos(ang) * rad;                  // «свой» слот относительно лидера
     a.sy = Math.sin(ang) * rad * 0.8;
     if (!a.spr) {
       a.spr = new PIXI.Sprite(this.sprites.runner0);
@@ -84,9 +168,10 @@ export class Crowd {
   }
 
   update(dt) {
+    // лидер плавно едет за пальцем
     this.leaderX += (this.targetX - this.leaderX) * Math.min(1, dt * 10);
 
-    // разделение через сетку — без неё толпа слипается в одну точку
+    // разделение через сетку — чтобы человечки не слипались в одну точку
     const cell = 56;
     const grid = new Map();
     for (const a of this.agents) {
@@ -113,7 +198,7 @@ export class Crowd {
       }
     }
 
-    const k = 26, damp = 7.5;
+    const k = 26, damp = 7.5; // пружина к своему слоту
     const bob = performance.now() / 1000;
     for (const a of this.agents) {
       a.sc = Math.min(1, a.sc + dt * 6);
@@ -126,6 +211,7 @@ export class Crowd {
       a.x += a.vx * dt * 8;
       a.y += a.vy * dt * 8;
 
+      // не выходим за дорогу
       const pad = 30;
       a.x = Math.max(C.ROAD_X + pad, Math.min(C.ROAD_X + C.ROAD_W - pad, a.x));
       a.y = Math.max(C.CROWD_Y - 170, Math.min(C.CROWD_Y + 170, a.y));
@@ -141,6 +227,7 @@ export class Crowd {
       a.shadow.alpha = 0.55;
     }
 
+    // число над толпой
     this.label.position.set(this.leaderX, C.CROWD_Y - 250);
     if (this.labelScaleT > 0) {
       this.labelScaleT = Math.max(0, this.labelScaleT - dt * 3.5);

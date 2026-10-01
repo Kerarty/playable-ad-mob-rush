@@ -1,9 +1,10 @@
-// добавил звук (синтез через webaudio) и тряску камеры
+// пул частиц: конфетти и «лопаются» человечки при потерях
 import { CONFIG } from './config.js';
 import { Sprites } from './render/sprites.js';
 import { Track } from './systems/track.js';
 import { Crowd } from './systems/crowd.js';
 import { Popups } from './systems/popupText.js';
+import { Particles } from './systems/particles.js';
 import { AudioSys } from './systems/audio.js';
 import { Camera } from './systems/camera.js';
 
@@ -35,7 +36,6 @@ function layout() {
 layout();
 window.addEventListener('resize', layout);
 
-// мир трясётся, UI сверху — потом пригодится
 const worldWrap = new PIXI.Container();
 root.addChild(worldWrap);
 const roadLayer = new PIXI.Container();
@@ -44,14 +44,17 @@ const fxLayer = new PIXI.Container();
 worldWrap.addChild(roadLayer, crowdLayer, fxLayer);
 
 const track = new Track(roadLayer, Sprites);
-const crowd = new Crowd(crowdLayer, Sprites);
+const particles = new Particles(fxLayer);
 const popups = new Popups(fxLayer);
 const cam = new Camera(worldWrap);
+const fx = { particles, popups, cam, audio: AudioSys };
+// теперь толпа знает про эффекты — при потерях бахают частицы
+const crowd = new Crowd(crowdLayer, Sprites, fx);
 
 let dragging = false;
 let lastX = 0;
 app.view.addEventListener('pointerdown', (e) => {
-  AudioSys.unlock(); // звук можно включать только после жеста пользователя
+  AudioSys.unlock();
   dragging = true;
   lastX = e.clientX;
 });
@@ -72,8 +75,9 @@ app.ticker.add(() => {
   const dt = rawDt * cam.dtScale();
   track.update(dt);
   crowd.update(dt);
+  particles.update(dt);
   popups.update(dt);
-  AudioSys.update(); // планирует ноты фонового лупа
+  AudioSys.update();
 });
 
 crowd.reset();
