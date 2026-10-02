@@ -1,8 +1,10 @@
-// пул частиц: конфетти и «лопаются» человечки при потерях
+// полный забег: ворота, шипы, лопасти и стена-босса, победа и рестарт
 import { CONFIG } from './config.js';
+import { FSM } from './state.js';
 import { Sprites } from './render/sprites.js';
 import { Track } from './systems/track.js';
 import { Crowd } from './systems/crowd.js';
+import { Obstacles } from './systems/obstacles.js';
 import { Popups } from './systems/popupText.js';
 import { Particles } from './systems/particles.js';
 import { AudioSys } from './systems/audio.js';
@@ -39,20 +41,24 @@ window.addEventListener('resize', layout);
 const worldWrap = new PIXI.Container();
 root.addChild(worldWrap);
 const roadLayer = new PIXI.Container();
+const objLayer = new PIXI.Container();
 const crowdLayer = new PIXI.Container();
 const fxLayer = new PIXI.Container();
-worldWrap.addChild(roadLayer, crowdLayer, fxLayer);
+worldWrap.addChild(roadLayer, objLayer, crowdLayer, fxLayer);
 
 const track = new Track(roadLayer, Sprites);
 const particles = new Particles(fxLayer);
 const popups = new Popups(fxLayer);
 const cam = new Camera(worldWrap);
 const fx = { particles, popups, cam, audio: AudioSys };
-// теперь толпа знает про эффекты — при потерях бахают частицы
 const crowd = new Crowd(crowdLayer, Sprites, fx);
+const obstacles = new Obstacles(track.events, objLayer, crowd, fx);
 
 let dragging = false;
 let lastX = 0;
+const clampTarget = (x) =>
+  Math.max(C.ROAD_X + 70, Math.min(C.ROAD_X + C.ROAD_W - 70, x));
+
 app.view.addEventListener('pointerdown', (e) => {
   AudioSys.unlock();
   dragging = true;
@@ -62,22 +68,89 @@ window.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   const dx = ((e.clientX - lastX) / viewScale) * C.DRAG_SENS;
   lastX = e.clientX;
-  crowd.targetX = Math.max(
-    C.ROAD_X + 70,
-    Math.min(C.ROAD_X + C.ROAD_W - 70, crowd.targetX + dx),
-  );
+  crowd.targetX = clampTarget(crowd.targetX + dx);
 });
 window.addEventListener('pointerup', () => { dragging = false; });
+
+function resetRun() {
+  track.reset();
+  obstacles.reset();
+  crowd.reset();
+  particles.clear();
+}
+
+function lose() {
+  if (['lose', 'win'].includes(fsm.currentName)) return;
+  AudioSys.lose();
+  cam.shake(18, 0.4);
+  cam.hitStop(90);
+  popups.show(C.W / 2, C.CROWD_Y - 320, 'TRY AGAIN!', C.COLORS.bad);
+  fsm.go('lose');
+}
+crowd.onEmpty = lose;
+
+obstacles.onBoss = (v) => {
+  if (crowd.count > v.ev.hp) {
+    obstacles.breakBoss(v);
+    cam.hitStop(120);
+    cam.shake(22, 0.55);
+    AudioSys.win();
+    particles.confettiRain();
+    popups.show(C.W / 2, C.CROWD_Y - 300, 'WIN!', C.COLORS.accent);
+    fsm.go('win');
+  } else {
+    crowd.wipeAll();
+    lose();
+  }
+};
+
+const fsm = new FSM();
+let stateTimer = 0;
+
+function gameUpdate(dt) {
+  track.update(dt);
+  obstacles.update(dt, track.traveled);
+  crowd.update(dt);
+  particles.update(dt);
+  popups.update(dt);
+  AudioSys.update();
+}
+
+fsm.add('run', {
+  update(dt) { gameUpdate(dt); },
+});
+
+fsm.add('lose', {
+  enter() { stateTimer = 0; },
+  update(dt) {
+    gameUpdate(dt);
+    stateTimer += dt;
+    if (stateTimer > 1.25) {
+      resetRun();
+      fsm.go('run');
+    }
+  },
+});
+
+fsm.add('win', {
+  enter() { stateTimer = 0; },
+  update(dt) {
+    gameUpdate(dt);
+    obstacles.tickBoss(dt);
+    stateTimer += dt;
+    if (stateTimer > 1.9) {
+      resetRun(); // end card будет позже, пока просто рестарт
+      fsm.go('run');
+    }
+  },
+});
 
 app.ticker.add(() => {
   const rawDt = Math.min(app.ticker.deltaMS, 34) / 1000;
   cam.update(rawDt);
   const dt = rawDt * cam.dtScale();
-  track.update(dt);
-  crowd.update(dt);
-  particles.update(dt);
-  popups.update(dt);
-  AudioSys.update();
+  fsm.update(dt);
 });
 
 crowd.reset();
+fsm.go('run');
