@@ -1,4 +1,4 @@
-// полный забег: ворота, шипы, лопасти и стена-босса, победа и рестарт
+// туториал: рука показывает свайп, прячется после первого касания
 import { CONFIG } from './config.js';
 import { FSM } from './state.js';
 import { Sprites } from './render/sprites.js';
@@ -9,6 +9,7 @@ import { Popups } from './systems/popupText.js';
 import { Particles } from './systems/particles.js';
 import { AudioSys } from './systems/audio.js';
 import { Camera } from './systems/camera.js';
+import { Tutorial } from './ui/tutorial.js';
 
 const C = CONFIG;
 Sprites.init();
@@ -45,6 +46,8 @@ const objLayer = new PIXI.Container();
 const crowdLayer = new PIXI.Container();
 const fxLayer = new PIXI.Container();
 worldWrap.addChild(roadLayer, objLayer, crowdLayer, fxLayer);
+const uiLayer = new PIXI.Container();
+root.addChild(uiLayer);
 
 const track = new Track(roadLayer, Sprites);
 const particles = new Particles(fxLayer);
@@ -53,9 +56,11 @@ const cam = new Camera(worldWrap);
 const fx = { particles, popups, cam, audio: AudioSys };
 const crowd = new Crowd(crowdLayer, Sprites, fx);
 const obstacles = new Obstacles(track.events, objLayer, crowd, fx);
+const tutorial = new Tutorial(uiLayer);
 
 let dragging = false;
 let lastX = 0;
+let dragAccum = 0;
 const clampTarget = (x) =>
   Math.max(C.ROAD_X + 70, Math.min(C.ROAD_X + C.ROAD_W - 70, x));
 
@@ -69,6 +74,7 @@ window.addEventListener('pointermove', (e) => {
   const dx = ((e.clientX - lastX) / viewScale) * C.DRAG_SENS;
   lastX = e.clientX;
   crowd.targetX = clampTarget(crowd.targetX + dx);
+  dragAccum += Math.abs(dx);
 });
 window.addEventListener('pointerup', () => { dragging = false; });
 
@@ -77,6 +83,7 @@ function resetRun() {
   obstacles.reset();
   crowd.reset();
   particles.clear();
+  dragAccum = 0;
 }
 
 function lose() {
@@ -116,6 +123,19 @@ function gameUpdate(dt) {
   AudioSys.update();
 }
 
+fsm.add('tutorial', {
+  enter() {
+    tutorial.show();
+  },
+  update(dt) {
+    gameUpdate(dt);
+    if (dragAccum > 60) {
+      tutorial.hide();
+      fsm.go('run');
+    }
+  },
+});
+
 fsm.add('run', {
   update(dt) { gameUpdate(dt); },
 });
@@ -139,7 +159,7 @@ fsm.add('win', {
     obstacles.tickBoss(dt);
     stateTimer += dt;
     if (stateTimer > 1.9) {
-      resetRun(); // end card будет позже, пока просто рестарт
+      resetRun();
       fsm.go('run');
     }
   },
@@ -150,7 +170,8 @@ app.ticker.add(() => {
   cam.update(rawDt);
   const dt = rawDt * cam.dtScale();
   fsm.update(dt);
+  tutorial.update(dt);
 });
 
 crowd.reset();
-fsm.go('run');
+fsm.go('tutorial');
