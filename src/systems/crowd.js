@@ -81,12 +81,14 @@ export class Crowd {
   // шипы срезают тех, кто оказался на их половине дороги
   killSide(side) {
     if (this.count <= 0) return 0;
-    const dead = Math.ceil(this.count / 2);
-    this.count -= dead;
+    const onSide = this.agents.filter((a) => (a.x - C.W / 2) * side > 0).length;
+    const ratio = this.agents.length ? onSide / this.agents.length : 0;
+    const dead = Math.round(this.count * ratio);
+    this.count = Math.max(0, this.count - dead);
     // бахнем частицами по видимой части
     let fxCount = 0;
     for (const a of this.agents) {
-      if ((a.x - C.W / 2) * side < 0 && fxCount < 14) {
+      if ((a.x - C.W / 2) * side > 0 && fxCount < 14) {
         this.fx.particles.burst(a.x, a.y, 5, {
           speed: 240, life: 0.45, tex: 'dot',
           tint: this.sprites.palette[a.colorIdx], scale: 0.7,
